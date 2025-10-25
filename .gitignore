@@ -8,3 +8,4 @@
 /src/bin
 /src/obj
 /src/.vs/
+/src/OrderService.Api/OrderService.Api.csproj.user
