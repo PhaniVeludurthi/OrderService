@@ -1,0 +1,73 @@
+services:
+  orderservice.api:
+    image: ${DOCKER_REGISTRY-}orderserviceapi
+    build:
+      context: .
+      dockerfile: OrderService.Api/Dockerfile
+    container_name: order-service
+    ports:
+      - "5004:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Host=orderdb;Database=orderdb;Username=postgres;Password=postgres
+      - Services__CatalogUrl=http://catalog-service:8080
+      - Services__SeatingUrl=http://seating-service:8080
+      - Services__PaymentUrl=http://payment-service:8080
+    depends_on:
+      orderdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ticketing-network
+    restart: on-failure
+
+  orderdb:
+    image: postgres
+    container_name: orderdb
+    restart: always
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_DB: orderdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - orderdb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ticketing-network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin_container
+    restart: always
+    ports:
+      - "8885:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@pgadmin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - ticketing-network
+
+networks:
+  ticketing-network:
+    driver: bridge
+    name: ticketing-network
+
+
+volumes:
+  orderdb_data:
+  pgadmin-data:
+
