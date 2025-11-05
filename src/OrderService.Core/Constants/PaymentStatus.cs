@@ -2,8 +2,12 @@
 {
     public static class PaymentStatus
     {
-        public const string Success = "SUCCESS";
-        public const string Pending = "PENDING";
-        public const string Failed = "FAILED";
+        public const string SUCCESS = "SUCCESS";
+        public const string PENDING = "PENDING";
+        public const string FAILED = "FAILED";
+    }
+    public class EventStatus
+    {
+        public const string ONSALE = "ON_SALE";
     }
 }

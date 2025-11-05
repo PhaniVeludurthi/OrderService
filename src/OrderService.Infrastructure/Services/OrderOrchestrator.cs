@@ -1,7 +1,10 @@
 ﻿using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
+using OrderService.Core.Constants;
 using OrderService.Core.Dtos.Requests;
 using OrderService.Core.Dtos.Responses;
 using OrderService.Core.Entities;
+using OrderService.Core.Events;
 using OrderService.Core.Interfaces;
 
 namespace OrderService.Infrastructure.Services
@@ -12,162 +15,474 @@ namespace OrderService.Infrastructure.Services
         ICatalogClient catalogClient,
         ISeatingClient seatingClient,
         IPaymentClient paymentClient,
+        ICorrelationService correlationService,
+        IOutboxRepository outboxRepository,
         ILogger<OrderOrchestrator> logger) : IOrderOrchestrator
     {
-        private readonly IOrderRepository _orderRepository = orderRepository;
-        private readonly ITicketRepository _ticketRepository = ticketRepository;
-        private readonly ICatalogClient _catalogClient = catalogClient;
-        private readonly ISeatingClient _seatingClient = seatingClient;
-        private readonly IPaymentClient _paymentClient = paymentClient;
-        private readonly ILogger<OrderOrchestrator> _logger = logger;
+        private readonly IOrderRepository _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
+        private readonly ITicketRepository _ticketRepository = ticketRepository ?? throw new ArgumentNullException(nameof(ticketRepository));
+        private readonly ICatalogClient _catalogClient = catalogClient ?? throw new ArgumentNullException(nameof(catalogClient));
+        private readonly ISeatingClient _seatingClient = seatingClient ?? throw new ArgumentNullException(nameof(seatingClient));
+        private readonly IPaymentClient _paymentClient = paymentClient ?? throw new ArgumentNullException(nameof(paymentClient));
+        private readonly ICorrelationService _correlationService = correlationService ?? throw new ArgumentNullException(nameof(correlationService));
+        private readonly IOutboxRepository _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
+        private readonly ILogger<OrderOrchestrator> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        private const int SEAT_RESERVATION_TTL_SECONDS = 900; // 15 minutes
+        private const decimal TAX_RATE = 0.05m;
 
         public async Task<OrderResponse> CreateOrderAsync(CreateOrderRequest request)
         {
-            _logger.LogInformation("Starting order creation for User: {UserId}, Event: {EventId}",
-                request.UserId, request.EventId);
+            ArgumentNullException.ThrowIfNull(request);
 
-            // Step 1: Validate event
-            var eventDto = await _catalogClient.GetEventAsync(request.EventId);
-            if (eventDto == null)
+            var correlationId = _correlationService.GetCorrelationId();
+
+            _logger.LogInformation(
+                "Starting order creation: EventId={EventId}, Seats={Seats}, UserId={UserId}, CorrelationId={CorrelationId}",
+                request.EventId,
+                string.Join(',', request.SeatIds),
+                request.UserId,
+                correlationId);
+
+            try
             {
-                throw new InvalidOperationException($"Event {request.EventId} not found");
-            }
-
-            if (eventDto.Status != "ON_SALE")
-            {
-                throw new InvalidOperationException($"Event is {eventDto.Status}, not available for booking");
-            }
-
-            // Step 2: Get seat details
-            var seats = await _catalogClient.GetSeatsAsync(request.SeatIds);
-            if (seats == null || seats.Count != request.SeatIds.Count)
-            {
-                throw new InvalidOperationException("One or more seats not found");
-            }
-
-            // Step 3: Reserve seats
-            var reservationRequest = new ReserveSeatRequest
-            {
-                EventId = request.EventId,
-                SeatIds = request.SeatIds,
-                UserId = request.UserId,
-                TtlSeconds = 900 // 15 minutes
-            };
-
-            var reservationResult = await _seatingClient.ReserveSeatsAsync(reservationRequest);
-            if (!reservationResult.Success)
-            {
-                throw new InvalidOperationException($"Seat reservation failed: {reservationResult.Message}");
-            }
-
-            // Step 4: Calculate total
-            decimal subtotal = seats.Sum(s => s.Price);
-            decimal tax = Math.Round(subtotal * 0.05m, 2);
-            decimal total = subtotal + tax;
-
-            // Step 5: Create order
-            var order = new Order
-            {
-                UserId = request.UserId,
-                EventId = request.EventId,
-                Status = "CREATED",
-                PaymentStatus = "PENDING",
-                OrderTotal = total,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            order = await _orderRepository.CreateAsync(order);
-
-            // Step 6: Process payment
-            var paymentRequest = new PaymentRequest
-            {
-                UserId = order.UserId,
-                Amount = order.OrderTotal
-            };
-
-            var paymentResult = await _paymentClient.ChargeAsync(paymentRequest);
-
-            if (paymentResult.Success && paymentResult.Status == "SUCCESS")
-            {
-                // Payment successful - confirm order
-                _logger.LogInformation("Payment successful for Order: {OrderId}", order.OrderId);
-
-                // Allocate seats
-                await _seatingClient.AllocateSeatsAsync(new AllocateSeatRequest
+                // Check for idempotency
+                var existingOrder = await CheckIdempotencyAsync(request.IdempotencyKey);
+                if (existingOrder != null)
                 {
-                    EventId = order.EventId,
-                    SeatIds = request.SeatIds
-                });
-
-                // Confirm order
-                order.Status = "CONFIRMED";
-                order.PaymentStatus = "SUCCESS";
-                await _orderRepository.UpdateAsync(order);
-
-                // Generate tickets
-                var tickets = new List<Ticket>();
-                foreach (var seat in seats)
-                {
-                    tickets.Add(new Ticket
-                    {
-                        OrderId = order.OrderId,
-                        EventId = order.EventId,
-                        SeatId = seat.SeatId,
-                        PricePaid = seat.Price
-                    });
+                    _logger.LogInformation(
+                        "Returning existing order for idempotency key: {IdempotencyKey}, OrderId={OrderId}",
+                        request.IdempotencyKey,
+                        existingOrder.OrderId);
+                    return MapToOrderResponse(existingOrder);
                 }
 
-                await _ticketRepository.CreateBulkAsync(tickets);
-                order.Tickets = tickets;
+                // Validate event
+                var eventDto = await ValidateEventAsync(request.EventId);
 
-                _logger.LogInformation("Order confirmed: {OrderId}", order.OrderId);
+                // Validate seats
+                var seats = await ValidateSeatsAsync(request.SeatIds);
+
+                // Reserve seats
+                await ReserveSeatsAsync(request.EventId, request.SeatIds, request.UserId);
+
+                // Calculate totals
+                var (subtotal, tax, total) = CalculateOrderTotal(seats);
+
+                // Create order
+                var order = await CreateOrderEntityAsync(request, total);
+
+                // Process payment and complete order
+                await ProcessPaymentAndCompleteOrderAsync(order, request.SeatIds, seats, eventDto, correlationId);
+
+                _logger.LogInformation(
+                    "Order creation completed: OrderId={OrderId}, Status={Status}, CorrelationId={CorrelationId}",
+                    order.OrderId,
+                    order.Status,
+                    correlationId);
+
+                return MapToOrderResponse(order);
             }
-            else
+            catch (Exception ex)
             {
-                // Payment failed - rollback
-                _logger.LogWarning("Payment failed for Order: {OrderId}", order.OrderId);
-
-                await _seatingClient.ReleaseSeatsAsync(new ReleaseSeatRequest
-                {
-                    EventId = order.EventId,
-                    SeatIds = request.SeatIds
-                });
-
-                order.Status = "CANCELLED";
-                order.PaymentStatus = "FAILED";
-                await _orderRepository.UpdateAsync(order);
-
-                throw new InvalidOperationException($"Payment failed: {paymentResult.Message}");
+                _logger.LogError(ex,
+                    "Order creation failed: EventId={EventId}, UserId={UserId}, CorrelationId={CorrelationId}",
+                    request.EventId,
+                    request.UserId,
+                    correlationId);
+                throw;
             }
-
-            return MapToOrderResponse(order);
         }
 
         public async Task<OrderResponse> CancelOrderAsync(int orderId)
         {
-            _logger.LogInformation("Cancelling order: {OrderId}", orderId);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(orderId);
 
-            var order = await _orderRepository.GetByIdAsync(orderId) ?? throw new InvalidOperationException($"Order {orderId} not found");
-            if (order.Status == "CANCELLED")
+            var correlationId = _correlationService.GetCorrelationId();
+
+            _logger.LogInformation(
+                "Starting order cancellation: OrderId={OrderId}, CorrelationId={CorrelationId}",
+                orderId,
+                correlationId);
+
+            try
             {
-                throw new InvalidOperationException("Order already cancelled");
+                // Get order
+                var order = await _orderRepository.GetByIdAsync(orderId);
+                if (order == null)
+                {
+                    _logger.LogWarning("Order not found: OrderId={OrderId}", orderId);
+                    throw new InvalidOperationException($"Order {orderId} not found");
+                }
+
+                // Check if already cancelled
+                if (order.Status == OrderStatus.CANCELLED)
+                {
+                    _logger.LogWarning("Order already cancelled: OrderId={OrderId}", orderId);
+                    throw new InvalidOperationException("Order already cancelled");
+                }
+
+                // Get tickets and release seats
+                var tickets = await _ticketRepository.GetByOrderIdAsync(orderId);
+                if (tickets.Count != 0)
+                {
+                    var seatIds = tickets.Select(t => t.SeatId).ToList();
+                    await ReleaseSeatsAsync(order.EventId, seatIds);
+                }
+
+                // Update order status
+                order.Status = OrderStatus.CANCELLED;
+                await _orderRepository.UpdateAsync(order);
+
+                // Publish cancellation event
+                await PublishOrderCancelledEventAsync(order, "Manual cancellation", correlationId);
+
+                _logger.LogInformation(
+                    "Order cancelled successfully: OrderId={OrderId}, CorrelationId={CorrelationId}",
+                    orderId,
+                    correlationId);
+
+                return MapToOrderResponse(order);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Order cancellation failed: OrderId={OrderId}, CorrelationId={CorrelationId}",
+                    orderId,
+                    correlationId);
+                throw;
+            }
+        }
+
+        #region Private Helper Methods
+
+        private async Task<Order?> CheckIdempotencyAsync(string? idempotencyKey)
+        {
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                return null;
+
+            return await _orderRepository.GetByIdempotencyKeyAsync(idempotencyKey);
+        }
+
+        private async Task<EventDto> ValidateEventAsync(int eventId)
+        {
+            var eventDto = await _catalogClient.GetEventAsync(eventId);
+
+            if (eventDto == null)
+            {
+                _logger.LogWarning("Event not found: EventId={EventId}", eventId);
+                throw new InvalidOperationException($"Event {eventId} not found");
             }
 
-            // Release seats
-            var tickets = await _ticketRepository.GetByOrderIdAsync(orderId);
-            var seatIds = tickets.Select(t => t.SeatId).ToList();
-
-            await _seatingClient.ReleaseSeatsAsync(new ReleaseSeatRequest
+            if (eventDto.Status != EventStatus.ONSALE)
             {
-                EventId = order.EventId,
-                SeatIds = seatIds
-            });
+                _logger.LogWarning(
+                    "Event not available for sale: EventId={EventId}, Status={Status}",
+                    eventId,
+                    eventDto.Status);
+                throw new InvalidOperationException($"Event {eventId} is not available for sale");
+            }
 
-            // Cancel order
-            order.Status = "CANCELLED";
+            return eventDto;
+        }
+
+        private async Task<List<SeatDto>> ValidateSeatsAsync(List<int> seatIds)
+        {
+            if (seatIds == null || !seatIds.Any())
+            {
+                throw new InvalidOperationException("At least one seat must be selected");
+            }
+
+            var seats = await _catalogClient.GetSeatsAsync(seatIds);
+
+            if (seats == null || seats.Count != seatIds.Count)
+            {
+                var foundSeatIds = seats?.Select(s => s.SeatId).ToList() ?? new List<int>();
+                var missingSeatIds = seatIds.Except(foundSeatIds).ToList();
+
+                _logger.LogWarning(
+                    "Seats not found: MissingSeatIds={MissingSeatIds}",
+                    string.Join(',', missingSeatIds));
+
+                throw new InvalidOperationException(
+                    $"One or more seats not found: {string.Join(',', missingSeatIds)}");
+            }
+
+            return seats;
+        }
+
+        private async Task ReserveSeatsAsync(int eventId, List<int> seatIds, int userId)
+        {
+            var reservationRequest = new ReserveSeatRequest
+            {
+                EventId = eventId,
+                SeatIds = seatIds,
+                UserId = userId,
+                TtlSeconds = SEAT_RESERVATION_TTL_SECONDS
+            };
+
+            var reservationResult = await _seatingClient.ReserveSeatsAsync(reservationRequest);
+
+            if (!reservationResult.Success)
+            {
+                _logger.LogWarning(
+                    "Seat reservation failed: EventId={EventId}, SeatIds={SeatIds}, Reason={Reason}",
+                    eventId,
+                    string.Join(',', seatIds),
+                    reservationResult.Message);
+
+                throw new InvalidOperationException(
+                    $"Seat reservation failed: {reservationResult.Message}");
+            }
+
+            _logger.LogInformation(
+                "Seats reserved successfully: EventId={EventId}, SeatIds={SeatIds}",
+                eventId,
+                string.Join(',', seatIds));
+        }
+
+        private static (decimal subtotal, decimal tax, decimal total) CalculateOrderTotal(List<SeatDto> seats)
+        {
+            var subtotal = seats.Sum(s => s.Price);
+            var tax = Math.Round(subtotal * TAX_RATE, 2);
+            var total = subtotal + tax;
+
+            return (subtotal, tax, total);
+        }
+
+        private async Task<Order> CreateOrderEntityAsync(CreateOrderRequest request, decimal total)
+        {
+            var order = new Order
+            {
+                UserId = request.UserId,
+                EventId = request.EventId,
+                Status = OrderStatus.CREATED,
+                PaymentStatus = PaymentStatus.PENDING,
+                OrderTotal = total,
+                CreatedAt = DateTime.UtcNow,
+                IdempotencyKey = request.IdempotencyKey,
+            };
+
+            order = await _orderRepository.CreateAsync(order);
+
+            _logger.LogInformation(
+                "Order entity created: OrderId={OrderId}, Total={Total}",
+                order.OrderId,
+                order.OrderTotal);
+
+            return order;
+        }
+
+        private async Task ProcessPaymentAndCompleteOrderAsync(
+            Order order,
+            List<int> seatIds,
+            List<SeatDto> seats,
+            EventDto eventDto,
+            string correlationId)
+        {
+            try
+            {
+                var paymentRequest = new PaymentRequest
+                {
+                    UserId = order.UserId,
+                    Amount = order.OrderTotal
+                };
+
+                var paymentResult = await _paymentClient.ChargeAsync(paymentRequest);
+
+                if (paymentResult.Success && paymentResult.Status == PaymentStatus.SUCCESS)
+                {
+                    await HandleSuccessfulPaymentAsync(order, seatIds, seats, eventDto, correlationId);
+                }
+                else
+                {
+                    await HandleFailedPaymentAsync(order, seatIds, paymentResult.Message ?? "Unknown error", correlationId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Payment or order completion crashed. OrderId={OrderId}, CorrelationId={CorrelationId}",
+                    order.OrderId, correlationId);
+
+                // Compensation - Release seats & mark order as failed
+                await HandleFailedPaymentAsync(order, seatIds, "Unexpected error during payment", correlationId);
+                throw; // Bubble up
+            }
+        }
+
+        private async Task HandleSuccessfulPaymentAsync(
+            Order order,
+            List<int> seatIds,
+            List<SeatDto> seats,
+            EventDto eventDto,
+            string correlationId)
+        {
+            _logger.LogInformation("Payment successful for OrderId={OrderId}", order.OrderId);
+
+            try
+            {
+                // Allocate seats
+                await _seatingClient.AllocateSeatsAsync(new AllocateSeatRequest
+                {
+                    EventId = order.EventId,
+                    SeatIds = seatIds
+                });
+
+                // Update order status
+                order.Status = OrderStatus.CONFIRMED;
+                order.PaymentStatus = PaymentStatus.SUCCESS;
+                await _orderRepository.UpdateAsync(order);
+
+                // Generate tickets
+                var tickets = await GenerateTicketsAsync(order, seats);
+                order.Tickets = tickets;
+
+                // Publish event in Outbox
+                await PublishOrderConfirmedEventAsync(order, tickets, eventDto, correlationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Failure after successful payment! Manual intervention may be needed. OrderId={OrderId}",
+                    order.OrderId);
+
+                // Mark as failed but DONT refund here automatically
+                order.Status = OrderStatus.PAYMENT_COMPLETED_BUT_FULFILLMENT_FAILED;
+                await _orderRepository.UpdateAsync(order);
+            }
+        }
+
+        private async Task HandleFailedPaymentAsync(
+            Order order,
+            List<int> seatIds,
+            string failureReason,
+            string correlationId)
+        {
+            _logger.LogWarning(
+                "Payment failed for OrderId={OrderId}, Reason={Reason}",
+                order.OrderId,
+                failureReason);
+
+            // Release seats
+            await ReleaseSeatsAsync(order.EventId, seatIds);
+
+            // Update order status
+            order.Status = OrderStatus.CANCELLED;
+            order.PaymentStatus = PaymentStatus.FAILED;
             await _orderRepository.UpdateAsync(order);
 
-            return MapToOrderResponse(order);
+            // Publish cancellation event
+            await PublishOrderCancelledEventAsync(order, failureReason, correlationId);
+        }
+
+        private async Task<List<Ticket>> GenerateTicketsAsync(Order order, List<SeatDto> seats)
+        {
+            var tickets = seats.Select(seat => new Ticket
+            {
+                OrderId = order.OrderId,
+                EventId = order.EventId,
+                SeatId = seat.SeatId,
+                PricePaid = seat.Price
+            }).ToList();
+
+            await _ticketRepository.CreateBulkAsync(tickets);
+
+            _logger.LogInformation(
+                "Tickets generated: OrderId={OrderId}, TicketCount={Count}",
+                order.OrderId,
+                tickets.Count);
+
+            return tickets;
+        }
+
+        private async Task ReleaseSeatsAsync(int eventId, List<int> seatIds)
+        {
+            try
+            {
+                await _seatingClient.ReleaseSeatsAsync(new ReleaseSeatRequest
+                {
+                    EventId = eventId,
+                    SeatIds = seatIds
+                });
+
+                _logger.LogInformation(
+                    "Seats released: EventId={EventId}, SeatIds={SeatIds}",
+                    eventId,
+                    string.Join(',', seatIds));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to release seats: EventId={EventId}, SeatIds={SeatIds}",
+                    eventId,
+                    string.Join(',', seatIds));
+                // Don't throw - log and continue
+            }
+        }
+
+        private async Task PublishOrderConfirmedEventAsync(
+            Order order,
+            List<Ticket> tickets,
+            EventDto eventDto,
+            string correlationId)
+        {
+            var orderConfirmedEvent = new OrderConfirmedEvent
+            {
+                OrderId = order.OrderId,
+                EventId = order.EventId,
+                UserId = order.UserId,
+                EventTitle = eventDto.Title,
+                OrderTotal = order.OrderTotal,
+                SeatIds = tickets.Select(t => t.SeatId).ToList(),
+                ConfirmedAt = DateTime.UtcNow,
+                CorrelationId = correlationId
+            };
+
+            await _outboxRepository.SaveEventAsync(new OutboxEvent
+            {
+                AggregateType = "Order",
+                AggregateId = order.OrderId.ToString(),
+                EventType = "OrderConfirmed",
+                EventPayloadJson = JsonConvert.SerializeObject(orderConfirmedEvent),
+                CorrelationId = correlationId,
+                CreatedAt = DateTime.UtcNow
+            });
+
+            _logger.LogInformation(
+                "OrderConfirmed event published: OrderId={OrderId}, CorrelationId={CorrelationId}",
+                order.OrderId,
+                correlationId);
+        }
+
+        private async Task PublishOrderCancelledEventAsync(
+            Order order,
+            string reason,
+            string correlationId)
+        {
+            var orderCancelledEvent = new OrderCancelledEvent
+            {
+                OrderId = order.OrderId,
+                Reason = reason,
+                CancelledAt = DateTime.UtcNow,
+                CorrelationId = correlationId
+            };
+
+            await _outboxRepository.SaveEventAsync(new OutboxEvent
+            {
+                AggregateType = "Order",
+                AggregateId = order.OrderId.ToString(),
+                EventType = "OrderCancelled",
+                EventPayloadJson = JsonConvert.SerializeObject(orderCancelledEvent),
+                CorrelationId = correlationId,
+                CreatedAt = DateTime.UtcNow
+            });
+
+            _logger.LogInformation(
+                "OrderCancelled event published: OrderId={OrderId}, Reason={Reason}, CorrelationId={CorrelationId}",
+                order.OrderId,
+                reason,
+                correlationId);
         }
 
         private static OrderResponse MapToOrderResponse(Order order)
@@ -181,15 +496,17 @@ namespace OrderService.Infrastructure.Services
                 PaymentStatus = order.PaymentStatus,
                 OrderTotal = order.OrderTotal,
                 CreatedAt = order.CreatedAt,
-                Tickets = order.Tickets.Select(t => new TicketResponse
+                Tickets = order.Tickets?.Select(t => new TicketResponse
                 {
                     TicketId = t.TicketId,
                     OrderId = t.OrderId,
                     EventId = t.EventId,
                     SeatId = t.SeatId,
                     PricePaid = t.PricePaid
-                }).ToList()
+                }).ToList() ?? new List<TicketResponse>()
             };
         }
+
+        #endregion
     }
 }

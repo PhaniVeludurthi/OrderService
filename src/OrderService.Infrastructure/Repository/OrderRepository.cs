@@ -102,5 +102,13 @@ namespace OrderService.Infrastructure.Repository
         {
             return await _context.Orders.CountAsync();
         }
+
+        public async Task<Order?> GetByIdempotencyKeyAsync(string idempotencyKey)
+        {
+            return await _context.Orders
+                .AsNoTracking()
+                .Include(o => o.Tickets)
+                .FirstOrDefaultAsync(o => o.IdempotencyKey == idempotencyKey);
+        }
     }
 }

@@ -1,4 +1,5 @@
-﻿using Serilog.Context;
+﻿using OrderService.Core.Interfaces;
+using Serilog.Context;
 
 namespace OrderService.Api.Middleware
 {
@@ -7,7 +8,7 @@ namespace OrderService.Api.Middleware
         private readonly RequestDelegate _next = next;
         private const string CorrelationIdHeader = "X-Correlation-ID";
 
-        public async Task InvokeAsync(HttpContext context)
+        public async Task InvokeAsync(HttpContext context, ICorrelationService correlationService)
         {
             var correlationId = context.Request.Headers[CorrelationIdHeader].ToString();
 
@@ -15,6 +16,8 @@ namespace OrderService.Api.Middleware
             {
                 correlationId = Guid.NewGuid().ToString();
             }
+            // Set the correlation ID for this request
+            correlationService.SetCorrelationId(correlationId);
 
             context.Response.Headers.Append(CorrelationIdHeader, correlationId);
 

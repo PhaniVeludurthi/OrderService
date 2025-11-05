@@ -14,6 +14,7 @@ services:
       - Services__CatalogUrl=http://catalog-service:8080
       - Services__SeatingUrl=http://seating-service:8080
       - Services__PaymentUrl=http://payment-service:8080
+      - Services__NotificationUrl=http://host.docker.internal:5006
     depends_on:
       orderdb:
         condition: service_healthy

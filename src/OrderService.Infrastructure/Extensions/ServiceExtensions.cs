@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OrderService.Core.Interfaces;
 using OrderService.Infrastructure.Data;
 using OrderService.Infrastructure.ExternalClient;
+using OrderService.Infrastructure.HostedServices;
 using OrderService.Infrastructure.Repository;
 using OrderService.Infrastructure.Services;
 
@@ -18,6 +19,8 @@ namespace OrderService.Infrastructure.Extensions
 
             services.AddScoped<IOrderRepository, OrderRepository>();
             services.AddScoped<ITicketRepository, TicketRepository>();
+            services.AddScoped<ICorrelationService, CorrelationService>();
+            services.AddScoped<IOutboxRepository, OutboxRepository>();
 
             // Orchestrator
             services.AddScoped<IOrderOrchestrator, OrderOrchestrator>();
@@ -43,12 +46,21 @@ namespace OrderService.Infrastructure.Extensions
                 client.Timeout = TimeSpan.FromSeconds(30);
             });
 
+            services.AddHttpClient<INotificationClient, NotificationClient>(client =>
+            {
+                client.BaseAddress = new Uri(configuration["Services:NotificationUrl"]!);
+                client.Timeout = TimeSpan.FromSeconds(30);
+            });
+
             // Health checks
             services.AddHealthChecks()
                 .AddNpgSql(
                     configuration.GetConnectionString("DefaultConnection")!,
                     name: "postgres",
                     tags: ["ready", "db"]);
+
+
+            services.AddHostedService<OutboxDispatcher>();
 
             return services;
         }

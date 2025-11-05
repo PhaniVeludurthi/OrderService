@@ -12,6 +12,7 @@
         public decimal OrderTotal { get; set; }
 
         public DateTime CreatedAt { get; set; }
+        public string? IdempotencyKey { get; set; }
 
         // Navigation properties
         public ICollection<Ticket> Tickets { get; set; } = new List<Ticket>();
