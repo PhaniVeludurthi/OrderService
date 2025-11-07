@@ -80,8 +80,34 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-app.MapHealthChecks("/health/live");
-app.MapHealthChecks("/health/ready");
+app.MapGet("/health/live", () => Results.Ok(new { status = "Healthy", service = "order-service" }))
+   .WithName("Liveness")
+   .WithTags("Health");
+
+app.MapGet("/health/ready", async (OrderDbContext dbContext) =>
+{
+    try
+    {
+        var canConnect = await dbContext.Database.CanConnectAsync();
+
+        if (canConnect)
+        {
+            return Results.Ok(new
+            {
+                status = "Ready",
+                database = "Connected"
+            });
+        }
+
+        return Results.StatusCode(503); // Service Unavailable
+    }
+    catch
+    {
+        return Results.StatusCode(503);
+    }
+})
+.WithName("Readiness")
+.WithTags("Health");
 
 // Prometheus metrics endpoint
 app.MapMetrics();
