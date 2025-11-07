@@ -188,12 +188,12 @@ namespace OrderService.Infrastructure.Services
 
         private async Task<List<SeatDto>> ValidateSeatsAsync(List<int> seatIds)
         {
-            if (seatIds == null || !seatIds.Any())
+            if (seatIds == null || seatIds.Count == 0)
             {
                 throw new InvalidOperationException("At least one seat must be selected");
             }
 
-            var seats = await _catalogClient.GetSeatsAsync(seatIds);
+            var seats = await _seatingClient.GetSeatsAsync(seatIds);
 
             if (seats == null || seats.Count != seatIds.Count)
             {

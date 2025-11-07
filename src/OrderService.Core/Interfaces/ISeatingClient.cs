@@ -5,6 +5,7 @@
         Task<ReservationResult> ReserveSeatsAsync(ReserveSeatRequest request);
         Task<bool> AllocateSeatsAsync(AllocateSeatRequest request);
         Task<bool> ReleaseSeatsAsync(ReleaseSeatRequest request);
+        Task<List<SeatDto>?> GetSeatsAsync(List<int> seatIds);
     }
 
     public class ReserveSeatRequest
@@ -41,5 +42,15 @@
         public int OrderId { get; set; }
         public int EventId { get; set; }
         public List<int> SeatIds { get; set; } = [];
+    }
+
+    public class SeatDto
+    {
+        public int SeatId { get; set; }
+        public string? SeatNumber { get; set; }
+        public string? Section { get; set; }
+        public string? Row { get; set; }
+        public decimal Price { get; set; }
+        public int EventId { get; set; }
     }
 }

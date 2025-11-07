@@ -33,7 +33,7 @@ services:
     container_name: orderdb
     restart: always
     ports:
-      - "5435:5432"
+      - "5436:5432"
     environment:
       POSTGRES_DB: orderdb
       POSTGRES_USER: postgres
@@ -48,19 +48,19 @@ services:
     networks:
       - ticketing-network
 
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: pgadmin_container
-    restart: always
-    ports:
-      - "8885:80"
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@pgadmin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-    volumes:
-      - pgadmin-data:/var/lib/pgadmin
-    networks:
-      - ticketing-network
+  # pgadmin:
+  #   image: dpage/pgadmin4
+  #   container_name: pgadmin_container
+  #   restart: always
+  #   ports:
+  #     - "8885:80"
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@pgadmin.com
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   volumes:
+  #     - pgadmin-data:/var/lib/pgadmin
+  #   networks:
+  #     - ticketing-network
 
 networks:
   ticketing-network:

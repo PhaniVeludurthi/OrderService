@@ -3,7 +3,6 @@
     public interface ICatalogClient
     {
         Task<EventDto?> GetEventAsync(int eventId);
-        Task<List<SeatDto>?> GetSeatsAsync(List<int> seatIds);
     }
 
     public class EventDto
@@ -19,13 +18,4 @@
         public decimal BasePrice { get; set; }
     }
 
-    public class SeatDto
-    {
-        public int SeatId { get; set; }
-        public string? SeatNumber { get; set; }
-        public string? Section { get; set; }
-        public string? Row { get; set; }
-        public decimal Price { get; set; }
-        public int EventId { get; set; }
-    }
 }
