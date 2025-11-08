@@ -1,21 +1,13 @@
 using OrderService.Api.Extensions;
 using OrderService.Api.Middleware;
+using OrderService.Core.Interfaces;
+using OrderService.Infrastructure;
 using OrderService.Infrastructure.Data;
 using OrderService.Infrastructure.Extensions;
 using Prometheus;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
-
-// Add services to the container.
-Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration)
-    .Enrich.FromLogContext()
-    .Enrich.WithThreadId()
-    .Enrich.WithProperty("ServiceName", "OrderService")
-    .CreateLogger();
-
-builder.Host.UseSerilog();
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -45,6 +37,21 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Build a temporary service provider to get the correlation service
+var serviceProvider = builder.Services.BuildServiceProvider();
+var correlationService = serviceProvider.GetRequiredService<ICorrelationService>();
+
+// Configure Serilog with the enricher
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .Enrich.FromLogContext()
+    .Enrich.WithThreadId()
+    .Enrich.WithProperty("ServiceName", "OrderService")
+    .Enrich.With(new CorrelationIdEnricher(correlationService))
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
@@ -66,6 +73,7 @@ app.MapOpenApi();
 app.UseSwaggerDocumentation();
 
 app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseRequestLogging();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 //app.UseStaticFiles();

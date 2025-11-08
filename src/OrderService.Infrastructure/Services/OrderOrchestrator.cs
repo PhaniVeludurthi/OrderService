@@ -6,6 +6,7 @@ using OrderService.Core.Dtos.Responses;
 using OrderService.Core.Entities;
 using OrderService.Core.Events;
 using OrderService.Core.Interfaces;
+using OrderService.Infrastructure.Metrics;
 
 namespace OrderService.Infrastructure.Services
 {
@@ -80,6 +81,8 @@ namespace OrderService.Infrastructure.Services
                     order.OrderId,
                     order.Status,
                     correlationId);
+
+                BusinessMetrics.OrdersTotal.Inc();
 
                 return MapToOrderResponse(order);
             }
@@ -231,6 +234,8 @@ namespace OrderService.Infrastructure.Services
                     string.Join(',', seatIds),
                     reservationResult.Message);
 
+                BusinessMetrics.SeatReservationsFailed.Inc();
+
                 throw new InvalidOperationException(
                     $"Seat reservation failed: {reservationResult.Message}");
             }
@@ -371,6 +376,8 @@ namespace OrderService.Infrastructure.Services
             order.Status = OrderStatus.CANCELLED;
             order.PaymentStatus = PaymentStatus.FAILED;
             await _orderRepository.UpdateAsync(order);
+
+            BusinessMetrics.PaymentsFailedTotal.Inc();
 
             // Publish cancellation event
             await PublishOrderCancelledEventAsync(order, failureReason, correlationId);
