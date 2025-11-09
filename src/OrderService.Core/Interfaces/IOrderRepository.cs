@@ -13,5 +13,6 @@ namespace OrderService.Core.Interfaces
         Task<List<Order>> GetAllAsync(int pageNumber = 1, int pageSize = 50);
         Task<int> GetTotalCountAsync();
         Task<Order?> GetByIdempotencyKeyAsync(string idempotencyKey);
+        Task<List<Order>> GetConfirmedOrdersByEventIdAsync(int eventId);
     }
 }

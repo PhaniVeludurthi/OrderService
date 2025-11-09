@@ -7,5 +7,6 @@ namespace OrderService.Core.Interfaces
     {
         Task<OrderResponse> CreateOrderAsync(CreateOrderRequest request);
         Task<OrderResponse> CancelOrderAsync(int orderId);
+        Task HandleEventCancelledAsync(int eventId);
     }
 }

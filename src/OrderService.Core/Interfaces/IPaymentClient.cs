@@ -3,7 +3,7 @@
     public interface IPaymentClient
     {
         Task<PaymentResult> ChargeAsync(PaymentRequest request);
-        Task<bool> RefundAsync(int paymentId);
+        Task<PaymentResult> RefundAsync(RefundRequest refundRequest);
     }
 
     public class PaymentRequest
@@ -21,5 +21,11 @@
         public string Status { get; set; }
         public string Message { get; set; }
         public string TransactionReference { get; set; }
+    }
+    public class RefundRequest
+    {
+        public int OrderId { get; set; }
+        public decimal Amount { get; set; }
+        public string Reason { get; set; }
     }
 }

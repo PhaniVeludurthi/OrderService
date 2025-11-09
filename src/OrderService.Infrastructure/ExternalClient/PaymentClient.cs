@@ -87,11 +87,11 @@ namespace OrderService.Infrastructure.ExternalClient
             }
         }
 
-        public async Task<bool> RefundAsync(int paymentId)
+        public async Task<PaymentResult> RefundAsync(RefundRequest refundRequest)
         {
             try
             {
-                _logger.LogInformation("Refunding payment: {PaymentId}", paymentId);
+                _logger.LogInformation("Refunding Order: {OrderId}", refundRequest.OrderId);
                 await Task.Delay(200); // Simulate refund processing
 
                 // Simulate 98% success rate for refunds
@@ -99,21 +99,25 @@ namespace OrderService.Infrastructure.ExternalClient
 
                 if (isSuccess)
                 {
-                    _logger.LogInformation("[MOCK] Refund successful for payment: {PaymentId}", paymentId);
+                    _logger.LogInformation("[MOCK] Refund successful for Order: {OrderId}", refundRequest.OrderId);
                 }
                 else
                 {
-                    _logger.LogWarning("[MOCK] Refund failed for payment: {PaymentId}", paymentId);
+                    _logger.LogWarning("[MOCK] Refund failed for Order: {OrderId}", refundRequest.OrderId);
                 }
 
-                return isSuccess;
+                return new PaymentResult { Success = isSuccess, Message = isSuccess ? "" : "Unkown Error" };
                 //var response = await _httpClient.PostAsync($"/v1/payments/{paymentId}/refund", null);
                 //return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error calling Payment Service for refund");
-                return false;
+                return new PaymentResult
+                {
+                    Success = false,
+                    Message = ex.Message,
+                };
             }
         }
     }

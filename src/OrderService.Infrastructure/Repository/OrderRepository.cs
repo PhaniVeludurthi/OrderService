@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using OrderService.Core.Constants;
 using OrderService.Core.Entities;
 using OrderService.Core.Interfaces;
 using OrderService.Infrastructure.Data;
@@ -109,6 +110,13 @@ namespace OrderService.Infrastructure.Repository
                 .AsNoTracking()
                 .Include(o => o.Tickets)
                 .FirstOrDefaultAsync(o => o.IdempotencyKey == idempotencyKey);
+        }
+
+        public async Task<List<Order>> GetConfirmedOrdersByEventIdAsync(int eventId)
+        {
+            return await _context.Orders
+                .Where(o => o.EventId == eventId && o.Status == OrderStatus.CONFIRMED)
+                .ToListAsync();
         }
     }
 }

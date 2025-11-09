@@ -19,4 +19,14 @@
         public DateTime CancelledAt { get; set; }
         public string CorrelationId { get; set; }
     }
+    public class OrderRefundedEvent
+    {
+        public int OrderId { get; set; }
+        public int EventId { get; set; }
+        public int UserId { get; set; }
+        public decimal RefundAmount { get; set; }
+        public string Reason { get; set; } = string.Empty;
+        public DateTime RefundedAt { get; set; }
+        public string CorrelationId { get; set; } = string.Empty;
+    }
 }
