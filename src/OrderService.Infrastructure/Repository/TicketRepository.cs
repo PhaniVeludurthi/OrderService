@@ -45,7 +45,7 @@ namespace OrderService.Infrastructure.Repository
                 .ToListAsync();
         }
 
-        public async Task<List<Ticket>> GetBySeatIdsAsync(List<int> seatIds)
+        public async Task<List<Ticket>> GetBySeatIdsAsync(List<string> seatIds)
         {
             _logger.LogInformation("Fetching tickets for {Count} seats", seatIds.Count);
 

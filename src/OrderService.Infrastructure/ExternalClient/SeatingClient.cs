@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using OrderService.Core.Interfaces;
+using System.Net.Http.Json;
 
 namespace OrderService.Infrastructure.ExternalClient
 {
@@ -7,10 +8,6 @@ namespace OrderService.Infrastructure.ExternalClient
     {
         private readonly HttpClient _httpClient = httpClient;
         private readonly ILogger<SeatingClient> _logger = logger;
-        private readonly Dictionary<string, DateTime> _reservedSeats = new Dictionary<string, DateTime>();
-        private readonly HashSet<string> _allocatedSeats = new HashSet<string>();
-        private readonly List<EventDto> _mockEvents = GenerateMockEvents();
-        private readonly List<SeatDto> _mockSeats = GenerateMockSeats();
         public async Task<ReservationResult> ReserveSeatsAsync(ReserveSeatRequest request)
         {
             try
@@ -18,83 +15,23 @@ namespace OrderService.Infrastructure.ExternalClient
                 _logger.LogInformation("Reserving {Count} seats for Event: {EventId}",
                     request.SeatIds.Count, request.EventId);
 
-                await Task.Delay(200); // Simulate network delay
+                var response = await _httpClient.PostAsJsonAsync("/v1/seats/reserve", request);
 
-                var reservedSeats = new List<ReservedSeat>();
-                var random = new Random();
-
-                foreach (var seatId in request.SeatIds)
+                if (!response.IsSuccessStatusCode)
                 {
-                    var key = $"{request.EventId}:{seatId}";
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError("Seat reservation failed. Status: {StatusCode}, Error: {Error}",
+                        response.StatusCode, errorContent);
 
-                    // Check if seat is already allocated
-                    if (_allocatedSeats.Contains(key))
+                    return new ReservationResult
                     {
-                        _logger.LogWarning("[MOCK] Seat {SeatId} is already allocated", seatId);
-                        return new ReservationResult
-                        {
-                            Success = false,
-                            Message = $"Seat {seatId} is already booked"
-                        };
-                    }
-
-                    // Check if seat is reserved by another order (not expired)
-                    if (_reservedSeats.ContainsKey(key))
-                    {
-                        if (_reservedSeats[key] > DateTime.UtcNow)
-                        {
-                            _logger.LogWarning("[MOCK] Seat {SeatId} is already reserved", seatId);
-                            return new ReservationResult
-                            {
-                                Success = false,
-                                Message = $"Seat {seatId} is currently reserved by another user"
-                            };
-                        }
-
-                        // Remove expired reservation
-                        _reservedSeats.Remove(key);
-                    }
-
-                    // Reserve the seat
-                    var expiryTime = DateTime.UtcNow.AddSeconds(request.TtlSeconds);
-                    _reservedSeats[key] = expiryTime;
-
-                    // Generate mock price
-                    var price = Math.Round((decimal)(random.NextDouble() * 1500 + 500), 2);
-
-                    reservedSeats.Add(new ReservedSeat
-                    {
-                        SeatId = seatId,
-                        Price = price
-                    });
+                        Success = false,
+                        Message = errorContent
+                    };
                 }
 
-                _logger.LogInformation("[MOCK] Successfully reserved {Count} seats", reservedSeats.Count);
-
-                return new ReservationResult
-                {
-                    Success = true,
-                    Message = "Seats reserved successfully",
-                    ReservedSeats = reservedSeats
-                };
-
-                //var response = await _httpClient.PostAsJsonAsync("/v1/seats/reserve", request);
-
-                //if (!response.IsSuccessStatusCode)
-                //{
-                //    var errorContent = await response.Content.ReadAsStringAsync();
-                //    _logger.LogError("Seat reservation failed. Status: {StatusCode}, Error: {Error}",
-                //        response.StatusCode, errorContent);
-
-                //    return new ReservationResult
-                //    {
-                //        Success = false,
-                //        Message = errorContent
-                //    };
-                //}
-
-                //var result = await response.Content.ReadFromJsonAsync<ReservationResult>();
-                //return result ?? new ReservationResult { Success = false, Message = "Unknown error" };
+                var result = await response.Content.ReadFromJsonAsync<ReservationResult>();
+                return result ?? new ReservationResult { Success = false, Message = "Unknown error" };
             }
             catch (Exception ex)
             {
@@ -113,11 +50,8 @@ namespace OrderService.Infrastructure.ExternalClient
             {
                 _logger.LogInformation("Allocating seats for Event: {EventId}", request.EventId);
 
-                await Task.Delay(150);
-                return true;
-
-                //var response = await _httpClient.PostAsJsonAsync("/v1/seats/allocate", request);
-                //return response.IsSuccessStatusCode;
+                var response = await _httpClient.PostAsJsonAsync("/v1/seats/allocate", request);
+                return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
             {
@@ -132,23 +66,8 @@ namespace OrderService.Infrastructure.ExternalClient
             {
                 _logger.LogInformation("Releasing seats for Event: {EventId}", request.EventId);
 
-                await Task.Delay(100); // Simulate network delay
-
-                // Remove reservations for this event
-                var keysToRemove = _reservedSeats.Keys
-                    .Where(k => k.StartsWith($"{request.EventId}:"))
-                    .ToList();
-
-                foreach (var key in keysToRemove)
-                {
-                    _reservedSeats.Remove(key);
-                }
-                _logger.LogInformation("[MOCK] Released {Count} seat reservations", keysToRemove.Count);
-
-                return true;
-
-                //var response = await _httpClient.PostAsJsonAsync("/v1/seats/release", request);
-                //return response.IsSuccessStatusCode;
+                var response = await _httpClient.PostAsJsonAsync("/v1/seats/release", request);
+                return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
             {
@@ -156,34 +75,23 @@ namespace OrderService.Infrastructure.ExternalClient
                 return false;
             }
         }
-        public async Task<List<SeatDto>?> GetSeatsAsync(List<int> seatIds)
+        public async Task<List<SeatDto>> GetSeatsAsync(int eventId)
         {
             try
             {
-                _logger.LogInformation("Fetching seat details for {Count} seats", seatIds.Count);
+                _logger.LogInformation("Fetching seat details for event {Count}", eventId);
 
-                await Task.Delay(100);
-                var seats = _mockSeats.Where(s => seatIds.Contains(s.SeatId)).ToList();
+                var response = await _httpClient.GetAsync($"/v1/seats?eventId={eventId}");
 
-                if (seats.Count != seatIds.Count)
+                if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("[MOCK] Some seats not found. Requested: {Requested}, Found: {Found}",
-                        seatIds.Count, seats.Count);
+                    _logger.LogError("Failed to fetch seats. Status: {StatusCode}", response.StatusCode);
+                    return [];
                 }
 
+                var result = await response.Content.ReadFromJsonAsync<TickerResponseData>();
+                var seats = result == null ? [] : result?.Data.Seats ?? [];
                 return seats;
-
-                //var queryString = string.Join("&", seatIds.Select(id => $"seatIds={id}"));
-                //var response = await _httpClient.GetAsync($"/v1/seats?{queryString}");
-
-                //if (!response.IsSuccessStatusCode)
-                //{
-                //    _logger.LogError("Failed to fetch seats. Status: {StatusCode}", response.StatusCode);
-                //    return new List<SeatDto>();
-                //}
-
-                //var seats = await response.Content.ReadFromJsonAsync<List<SeatDto>>();
-                //return seats ?? new List<SeatDto>();
             }
             catch (Exception ex)
             {
@@ -228,7 +136,6 @@ namespace OrderService.Infrastructure.ExternalClient
             var random = new Random(42); // Fixed seed
 
             // Generate sample seats for events 1-60
-            int seatId = 1;
             for (int eventId = 1; eventId <= 60; eventId++)
             {
                 int seatsPerEvent = random.Next(50, 200);
@@ -253,7 +160,7 @@ namespace OrderService.Infrastructure.ExternalClient
 
                     seats.Add(new SeatDto
                     {
-                        SeatId = seatId++,
+                        SeatId = Guid.NewGuid().ToString(),
                         EventId = eventId,
                         Section = section,
                         Row = row.ToString(),

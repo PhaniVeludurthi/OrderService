@@ -9,7 +9,7 @@ namespace OrderService.Core.Interfaces
         Task<List<Ticket>> CreateBulkAsync(List<Ticket> tickets);
         Task UpdateAsync(Ticket ticket);
         Task<List<Ticket>> GetByEventIdAsync(int eventId);
-        Task<List<Ticket>> GetBySeatIdsAsync(List<int> seatIds);
+        Task<List<Ticket>> GetBySeatIdsAsync(List<string> seatIds);
         Task<Ticket> CreateAsync(Ticket ticket);
     }
 }

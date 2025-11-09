@@ -140,7 +140,7 @@ namespace OrderService.Infrastructure.Data
                 TicketId = r.TicketId,
                 OrderId = r.OrderId,
                 EventId = r.EventId,
-                SeatId = r.SeatId,
+                SeatId = r.SeatId.ToString(),
                 PricePaid = r.PricePaid
             }).ToList();
 

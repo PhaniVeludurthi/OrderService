@@ -6,7 +6,7 @@
         public int UserId { get; set; }
         public int EventId { get; set; }
         public string? EventTitle { get; set; }
-        public List<int> SeatIds { get; set; }
+        public List<string> SeatIds { get; set; }
         public decimal OrderTotal { get; set; }
         public DateTime ConfirmedAt { get; set; }
         public string CorrelationId { get; set; }

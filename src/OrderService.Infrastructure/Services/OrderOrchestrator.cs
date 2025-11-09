@@ -62,7 +62,7 @@ namespace OrderService.Infrastructure.Services
                 var eventDto = await ValidateEventAsync(request.EventId);
 
                 // Validate seats
-                var seats = await ValidateSeatsAsync(request.SeatIds);
+                var seats = await ValidateSeatsAsync(request.EventId, request.SeatIds);
 
                 // Reserve seats
                 await ReserveSeatsAsync(request.EventId, request.SeatIds, request.UserId);
@@ -130,7 +130,7 @@ namespace OrderService.Infrastructure.Services
                 if (tickets.Count != 0)
                 {
                     var seatIds = tickets.Select(t => t.SeatId).ToList();
-                    await ReleaseSeatsAsync(order.EventId, seatIds);
+                    await ReleaseSeatsAsync(order.UserId, order.EventId, seatIds);
                 }
 
                 // Update order status
@@ -189,20 +189,19 @@ namespace OrderService.Infrastructure.Services
             return eventDto;
         }
 
-        private async Task<List<SeatDto>> ValidateSeatsAsync(List<int> seatIds)
+        private async Task<List<SeatDto>> ValidateSeatsAsync(int eventId, List<string> seatIds)
         {
             if (seatIds == null || seatIds.Count == 0)
             {
                 throw new InvalidOperationException("At least one seat must be selected");
             }
 
-            var seats = await _seatingClient.GetSeatsAsync(seatIds);
+            var seats = await _seatingClient.GetSeatsAsync(eventId);
+            var foundSeatIds = seats?.Select(s => s.SeatId).ToList() ?? [];
+            var missingSeatIds = seatIds.Except(foundSeatIds).ToList();
 
-            if (seats == null || seats.Count != seatIds.Count)
+            if (missingSeatIds.Count > 0)
             {
-                var foundSeatIds = seats?.Select(s => s.SeatId).ToList() ?? new List<int>();
-                var missingSeatIds = seatIds.Except(foundSeatIds).ToList();
-
                 _logger.LogWarning(
                     "Seats not found: MissingSeatIds={MissingSeatIds}",
                     string.Join(',', missingSeatIds));
@@ -214,13 +213,13 @@ namespace OrderService.Infrastructure.Services
             return seats;
         }
 
-        private async Task ReserveSeatsAsync(int eventId, List<int> seatIds, int userId)
+        private async Task ReserveSeatsAsync(int eventId, List<string> seatIds, int userId)
         {
             var reservationRequest = new ReserveSeatRequest
             {
-                EventId = eventId,
+                EventId = eventId.ToString(),
                 SeatIds = seatIds,
-                UserId = userId,
+                UserId = userId.ToString(),
                 TtlSeconds = SEAT_RESERVATION_TTL_SECONDS
             };
 
@@ -280,7 +279,7 @@ namespace OrderService.Infrastructure.Services
 
         private async Task ProcessPaymentAndCompleteOrderAsync(
             Order order,
-            List<int> seatIds,
+            List<string> seatIds,
             List<SeatDto> seats,
             EventDto eventDto,
             string correlationId)
@@ -318,7 +317,7 @@ namespace OrderService.Infrastructure.Services
 
         private async Task HandleSuccessfulPaymentAsync(
             Order order,
-            List<int> seatIds,
+            List<string> seatIds,
             List<SeatDto> seats,
             EventDto eventDto,
             string correlationId)
@@ -330,8 +329,9 @@ namespace OrderService.Infrastructure.Services
                 // Allocate seats
                 await _seatingClient.AllocateSeatsAsync(new AllocateSeatRequest
                 {
-                    EventId = order.EventId,
-                    SeatIds = seatIds
+                    EventId = order.EventId.ToString(),
+                    SeatIds = seatIds,
+                    UserId = order.UserId.ToString()
                 });
 
                 // Update order status
@@ -360,7 +360,7 @@ namespace OrderService.Infrastructure.Services
 
         private async Task HandleFailedPaymentAsync(
             Order order,
-            List<int> seatIds,
+            List<string> seatIds,
             string failureReason,
             string correlationId)
         {
@@ -370,7 +370,7 @@ namespace OrderService.Infrastructure.Services
                 failureReason);
 
             // Release seats
-            await ReleaseSeatsAsync(order.EventId, seatIds);
+            await ReleaseSeatsAsync(order.UserId, order.EventId, seatIds);
 
             // Update order status
             order.Status = OrderStatus.CANCELLED;
@@ -403,14 +403,15 @@ namespace OrderService.Infrastructure.Services
             return tickets;
         }
 
-        private async Task ReleaseSeatsAsync(int eventId, List<int> seatIds)
+        private async Task ReleaseSeatsAsync(int userId, int eventId, List<string> seatIds)
         {
             try
             {
                 await _seatingClient.ReleaseSeatsAsync(new ReleaseSeatRequest
                 {
-                    EventId = eventId,
-                    SeatIds = seatIds
+                    EventId = eventId.ToString(),
+                    SeatIds = seatIds,
+                    UserId = userId.ToString()
                 });
 
                 _logger.LogInformation(

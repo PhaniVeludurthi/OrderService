@@ -23,7 +23,7 @@ namespace OrderService.Api.Examples
                         TicketId = 741,
                         OrderId = 401,
                         EventId = 25,
-                        SeatId = 3121,
+                        SeatId = "3121",
                         PricePaid = 1000.25m
                     },
                     new TicketResponse
@@ -31,7 +31,7 @@ namespace OrderService.Api.Examples
                         TicketId = 742,
                         OrderId = 401,
                         EventId = 25,
-                        SeatId = 3122,
+                        SeatId = "3122",
                         PricePaid = 1000.25m
                     },
                     new TicketResponse
@@ -39,7 +39,7 @@ namespace OrderService.Api.Examples
                         TicketId = 743,
                         OrderId = 401,
                         EventId = 25,
-                        SeatId = 3123,
+                        SeatId = "3123",
                         PricePaid = 1000.25m
                     }
                 }

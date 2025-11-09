@@ -10,8 +10,8 @@ namespace OrderService.Api.Examples
             return new CreateOrderRequest
             {
                 UserId = 1,
-                EventId = 25,
-                SeatIds = new List<int> { 3121, 3122, 3123 }
+                EventId = 33,
+                SeatIds = new List<string> { "4086", "4093", "4084" }
             };
         }
     }
