@@ -210,7 +210,9 @@ namespace OrderService.Infrastructure.Services
                     $"One or more seats not found: {string.Join(',', missingSeatIds)}");
             }
 
-            return seats;
+            var result = seats?.Where(x => seatIds.Contains(x.SeatId)).ToList() ?? [];
+
+            return result;
         }
 
         private async Task ReserveSeatsAsync(int eventId, List<string> seatIds, int userId)

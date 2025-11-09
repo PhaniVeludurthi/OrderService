@@ -11,7 +11,8 @@ namespace OrderService.Api.Examples
             {
                 UserId = 1,
                 EventId = 33,
-                SeatIds = new List<string> { "4086", "4093", "4084" }
+                SeatIds = ["4086", "4093", "4084"],
+                IdempotencyKey = Guid.NewGuid().ToString(),
             };
         }
     }

@@ -5,7 +5,7 @@
         Task<ReservationResult> ReserveSeatsAsync(ReserveSeatRequest request);
         Task<bool> AllocateSeatsAsync(AllocateSeatRequest request);
         Task<bool> ReleaseSeatsAsync(ReleaseSeatRequest request);
-        Task<List<SeatDto>?> GetSeatsAsync(int eventId);
+        Task<List<SeatDto>> GetSeatsAsync(int eventId);
     }
 
     public class ReserveSeatRequest
@@ -20,7 +20,7 @@
     {
         public bool Success { get; set; }
         public string Message { get; set; }
-        public List<ReservedSeat> ReservedSeats { get; set; }
+        public List<SeatDto> ReservedSeats { get; set; }
     }
 
     public class ReservedSeat
@@ -51,7 +51,11 @@
         public string? Section { get; set; }
         public string? Row { get; set; }
         public decimal Price { get; set; }
-        public int EventId { get; set; }
+        public string? Status { get; set; }
+        public string EventId { get; set; }
+        public string? ReservedBy { get; set; }
+        public DateTime? ReservedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
     }
 
     public class TickerResponseData
@@ -64,5 +68,18 @@
     public class SeatResponse
     {
         public List<SeatDto> Seats { get; set; }
+    }
+
+    public class SeatingResponseObject<T>
+    {
+        public string? Status { get; set; }
+        public string? Code { get; set; }
+        public string? Message { get; set; }
+        public T? Data { get; set; }
+    }
+
+    public class ReserveSeatsResponse
+    {
+        public List<SeatDto> Seats { get; set; } = [];
     }
 }
