@@ -1,0 +1,92 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seq-pvc
+  namespace: ticketing
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # Add this if your cluster uses a default storage class (like standard / gp2 / gp3)
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seq
+  namespace: ticketing
+  labels:
+    app: seq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seq
+  template:
+    metadata:
+      labels:
+        app: seq
+    spec:
+      containers:
+      - name: seq
+        image: datalust/seq:latest
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 5341
+          name: ingestion
+        env:
+        - name: ACCEPT_EULA
+          value: "Y"
+        - name: SEQ_FIRSTRUN_ADMINUSERNAME
+          value: "admin"
+        - name: SEQ_FIRSTRUN_ADMINPASSWORD
+          value: "admin"
+        volumeMounts:
+        - name: seq-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        readinessProbe:
+          httpGet:
+            path: /api
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /api
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 30
+      volumes:
+      - name: seq-data
+        persistentVolumeClaim:
+          claimName: seq-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seq
+  namespace: ticketing
+  labels:
+    app: seq
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
+  - port: 5341
+    targetPort: 5341
+    name: ingestion
+  selector:
+    app: seq

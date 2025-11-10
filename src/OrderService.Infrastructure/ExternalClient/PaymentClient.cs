@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using OrderService.Core.Interfaces;
+using System.Net.Http.Json;
 
 namespace OrderService.Infrastructure.ExternalClient
 {
@@ -14,66 +15,66 @@ namespace OrderService.Infrastructure.ExternalClient
             {
                 _logger.LogInformation("Processing payment for Amount: {Amount}", request.Amount);
 
-                await Task.Delay(300);
-                // Simulate 95% success rate
-                var isSuccess = _random.NextDouble() < 0.95;
+                //await Task.Delay(300);
+                //// Simulate 95% success rate
+                //var isSuccess = _random.NextDouble() < 0.95;
 
-                if (isSuccess)
-                {
-                    var paymentId = _random.Next(1000, 9999);
-                    var reference = $"PAY-MOCK-{DateTime.UtcNow:yyyyMMddHHmmss}-{paymentId}";
-
-                    _logger.LogInformation("[MOCK] Payment successful. Reference: {Reference}", reference);
-
-                    return new PaymentResult
-                    {
-                        Success = true,
-                        PaymentId = paymentId,
-                        Status = "SUCCESS",
-                        Message = "Payment processed successfully",
-                        TransactionReference = reference
-                    };
-                }
-                else
-                {
-                    _logger.LogWarning("[MOCK] Payment failed - Simulated failure");
-
-                    var failureReasons = new[]
-                    {
-                    "Insufficient funds",
-                    "Card declined",
-                    "Payment gateway timeout",
-                    "Invalid card details"
-                };
-
-                    var reason = failureReasons[_random.Next(failureReasons.Length)];
-
-                    return new PaymentResult
-                    {
-                        Success = false,
-                        Status = "FAILED",
-                        Message = reason
-                    };
-                }
-
-                //var response = await _httpClient.PostAsJsonAsync("/v1/payments/charge", request);
-
-                //if (!response.IsSuccessStatusCode)
+                //if (isSuccess)
                 //{
-                //    var errorContent = await response.Content.ReadAsStringAsync();
-                //    _logger.LogError("Payment failed. Status: {StatusCode}, Error: {Error}",
-                //        response.StatusCode, errorContent);
+                //    var paymentId = _random.Next(1000, 9999);
+                //    var reference = $"PAY-MOCK-{DateTime.UtcNow:yyyyMMddHHmmss}-{paymentId}";
+
+                //    _logger.LogInformation("Payment successful. Reference: {Reference}", reference);
+
+                //    return new PaymentResult
+                //    {
+                //        Success = true,
+                //        PaymentId = paymentId,
+                //        Status = "SUCCESS",
+                //        Message = "Payment processed successfully",
+                //        TransactionReference = reference
+                //    };
+                //}
+                //else
+                //{
+                //    _logger.LogWarning("Payment failed - Simulated failure");
+
+                //    var failureReasons = new[]
+                //    {
+                //        "Insufficient funds",
+                //        "Card declined",
+                //        "Payment gateway timeout",
+                //        "Invalid card details"
+                //    };
+
+                //    var reason = failureReasons[_random.Next(failureReasons.Length)];
 
                 //    return new PaymentResult
                 //    {
                 //        Success = false,
                 //        Status = "FAILED",
-                //        Message = errorContent
+                //        Message = reason
                 //    };
                 //}
 
-                //var result = await response.Content.ReadFromJsonAsync<PaymentResult>();
-                //return result ?? new PaymentResult { Success = false, Status = "FAILED" };
+                var response = await _httpClient.PostAsJsonAsync("/v1/payments/charge", request);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError("Payment failed. Status: {StatusCode}, Error: {Error}",
+                        response.StatusCode, errorContent);
+
+                    return new PaymentResult
+                    {
+                        Success = false,
+                        Status = "FAILED",
+                        Message = errorContent
+                    };
+                }
+
+                var result = await response.Content.ReadFromJsonAsync<PaymentResult>();
+                return result ?? new PaymentResult { Success = false, Status = "FAILED" };
             }
             catch (Exception ex)
             {
@@ -99,15 +100,15 @@ namespace OrderService.Infrastructure.ExternalClient
 
                 if (isSuccess)
                 {
-                    _logger.LogInformation("[MOCK] Refund successful for Order: {OrderId}", refundRequest.OrderId);
+                    _logger.LogInformation("Refund successful for Order: {OrderId}", refundRequest.OrderId);
                 }
                 else
                 {
-                    _logger.LogWarning("[MOCK] Refund failed for Order: {OrderId}", refundRequest.OrderId);
+                    _logger.LogWarning("Refund failed for Order: {OrderId}", refundRequest.OrderId);
                 }
 
                 return new PaymentResult { Success = isSuccess, Message = isSuccess ? "" : "Unkown Error" };
-                //var response = await _httpClient.PostAsync($"/v1/payments/{paymentId}/refund", null);
+                //var response = await _httpClient.PostAsync($"/v1/payments/{OrderId}/refund", null);
                 //return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
